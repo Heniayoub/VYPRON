@@ -1,0 +1,26 @@
+const $=s=>document.querySelector(s);
+const cfg=window.VYPRON_CONFIG||{};
+const configured=cfg.SUPABASE_URL?.startsWith("https://")&&!cfg.SUPABASE_ANON_KEY?.startsWith("PASTE_");
+const supabaseClient=configured?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY):null;
+let currentTab="overview";
+const tables={clients:"clients",agents:"agents",services:"services",orders:"orders",subs:"subscriptions"};
+const labels={clients:"العملاء",agents:"الوكلاء",services:"الخدمات",orders:"الطلبات",subs:"الاشتراكات"};
+const authMsg=(m)=>$("#authmsg").textContent=m;
+$("#signin").onclick=async()=>{if(!supabaseClient)return authMsg("يلزم إعداد config.js وربط Supabase أولًا");let {error}=await supabaseClient.auth.signInWithPassword({email:$("#email").value,password:$("#password").value});authMsg(error?error.message:"");};
+$("#signup").onclick=async()=>{if(!supabaseClient)return authMsg("يلزم إعداد config.js وربط Supabase أولًا");let {error}=await supabaseClient.auth.signUp({email:$("#email").value,password:$("#password").value});authMsg(error?error.message:"تم إرسال طلب إنشاء الحساب. إذا فعّلت تأكيد الإيميل، راجع بريدك.");};
+$("#logout").onclick=async()=>{await supabaseClient.auth.signOut();};
+supabaseClient?.auth.onAuthStateChange((event,session)=>showSession(session));
+async function showSession(session){const ok=!!session;$("#auth").classList.toggle("hidden",ok);$("#dashboard").classList.toggle("hidden",!ok);$("#logout").classList.toggle("hidden",!ok);if(ok)render();}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{currentTab=b.dataset.tab;document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");render()});
+function safe(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+async function queryTable(table){let {data,error}=await supabaseClient.from(table).select("*").order("created_at",{ascending:false});if(error)throw error;return data||[]}
+async function insert(table,payload){let {error}=await supabaseClient.from(table).insert(payload);if(error)throw error}
+async function del(table,id){let {error}=await supabaseClient.from(table).delete().eq("id",id);if(error)throw error}
+async function render(){const content=$("#content");content.innerHTML='<div class="panel">تحميل البيانات…</div>';try{
+ if(currentTab==="overview"){let vals=await Promise.all(Object.values(tables).map(queryTable));content.innerHTML=`<div class="grid">${vals.map((v,i)=>`<div class="card"><small>${labels[Object.keys(tables)[i]]}</small><div class="metric">${v.length}</div></div>`).join("")}</div><div class="panel"><h2>ملخص</h2><p class="muted">الأرقام من قاعدة البيانات المرتبطة بحسابك.</p></div>`;return}
+ let table=tables[currentTab],rows=await queryTable(table);let formFields=currentTab==="clients"?'<input name="name" placeholder="اسم العميل" required><input name="contact" placeholder="رقم أو بريد للتواصل">':currentTab==="agents"?'<input name="name" placeholder="اسم الوكيل" required><input name="contact" placeholder="معلومات التواصل">':currentTab==="services"?'<input name="name" placeholder="اسم الخدمة" required><input name="price" placeholder="السعر"><input name="details" placeholder="تفاصيل">':currentTab==="orders"?'<input name="title" placeholder="عنوان الطلب" required><input name="customer_name" placeholder="اسم العميل"><select name="status"><option>جديد</option><option>قيد التنفيذ</option><option>مكتمل</option><option>ملغي</option></select>':'<input name="customer_name" placeholder="اسم العميل" required><input name="plan" placeholder="اسم الباقة"><input name="expires_at" type="date" placeholder="تاريخ الانتهاء"><select name="status"><option>نشط</option><option>منتهي</option><option>موقوف</option></select>';
+content.innerHTML=`<div class="panel"><h2>إضافة ${labels[currentTab]}</h2><form id="addForm" class="form">${formFields}<button type="submit">حفظ</button><p class="note" id="msg"></p></form></div><div class="panel"><h2>${labels[currentTab]} (${rows.length})</h2><div>${rows.map(r=>`<div class="item"><div><b>${safe(r.name||r.title||r.customer_name||r.plan||"سجل")}</b><div class="muted">${safe(r.contact||r.details||r.status||r.price||r.expires_at||"")}</div></div><div class="actions"><button class="danger" data-del="${safe(r.id)}">حذف</button></div></div>`).join("")||'<p class="muted">ما فماش سجلات.</p>'}</div>`;
+$("#addForm").onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target),obj=Object.fromEntries(f.entries());Object.keys(obj).forEach(k=>{if(!obj[k])delete obj[k]});try{await insert(table,obj);render()}catch(err){$("#msg").textContent=err.message}};
+content.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(confirm("متأكد من الحذف؟"))try{await del(table,b.dataset.del);render()}catch(err){alert(err.message)}});
+}catch(err){content.innerHTML=`<div class="panel"><h3>صار خطأ في تحميل البيانات</h3><p class="note">${safe(err.message)}</p><p class="muted">راجع إعداد Supabase، الجداول والسياسات الأمنية.</p></div>`}}
+showSession(null);
